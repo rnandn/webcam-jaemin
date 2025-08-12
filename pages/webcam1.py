@@ -218,8 +218,9 @@ html_code = f"""
 # embed HTML di Streamlit
 st.components.v1.html(html_code, height=820, scrolling=True)
 
-    # Tombol foto ulang
-    if st.button("🔄 Foto Ulang"):
-        st.session_state.photo = None
-        st.rerun()
+# Tombol foto ulang
+if st.button("🔄 Foto Ulang"):
+    st.session_state.photo = None
+    st.rerun()
+
 
