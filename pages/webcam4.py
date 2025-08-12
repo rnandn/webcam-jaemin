@@ -1,75 +1,191 @@
 import streamlit as st
-import cv2
-from PIL import Image
-import numpy as np
-import os
-from datetime import datetime
-import io
+from pathlib import Path
+import base64
+
+st.set_page_config(layout="wide", page_title="Webcam + Live Frame (HTML overlay)")
 
 st.title("📸 Webcam dengan Frame")
 
-# Pilih frame PNG
-frame_path = "Design Frame/autumn_frame.png"  
-frame_image = Image.open(frame_path).convert("RGBA")
+# --- load frame png ---
+FRAME_PATH = Path("Design Frame") / "autumn_frame.png"
+if not FRAME_PATH.exists():
+    st.error(f"Frame tidak ditemukan di: {FRAME_PATH}. Pastikan path dan nama file benar.")
+    st.stop()
 
-# Placeholder kamera
-camera_placeholder = st.empty()
+with open(FRAME_PATH, "rb") as f:
+    frame_bytes = f.read()
+frame_b64 = base64.b64encode(frame_bytes).decode("utf-8")
+frame_data_url = f"data:image/png;base64,{frame_b64}"
 
-# State untuk simpan foto sementara
-if "photo" not in st.session_state:
-    st.session_state.photo = None
+html_code = f"""
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8"/>
+    <style>
+      .wrap {{
+        display:flex;
+        flex-direction:column;
+        align-items:center;
+        justify-content:center;
+        gap:12px;
+      }}
+      #videoContainer {{
+        position: relative;
+        display:inline-block;
+        max-width: 1280px;
+        width: 100%;
+        aspect-ratio: 16/9;
+      }}
+      video {{
+        width:100%;
+        height:auto;
+        -webkit-transform: scaleX(-1);
+        transform: scaleX(-1);
+      }}
+      #overlayImg {{
+        position:absolute;
+        left:0;
+        top:0;
+        width:100%;
+        height:100%;
+        pointer-events:none;
+        image-rendering: optimizeQuality;
+      }}
+      #controls {{
+        display:flex;
+        gap:10px;
+        justify-content:center;
+        margin-top:6px;
+      }}
+      button {{
+        padding:10px 18px;
+        font-size:16px;
+        border-radius:8px;
+        border: none;
+        background:#ff7ab6;
+        color:white;
+        cursor:pointer;
+      }}
+      button:active {{ transform: translateY(1px); }}
+      #resultImg {{
+        max-width:100%;
+        height:auto;
+        border: 4px solid #eee;
+      }}
+      .hint {{ color: #666; font-size: 14px; }}
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div id="videoContainer">
+        <video id="video" autoplay playsinline></video>
+        <img id="overlayImg" src="{frame_data_url}" />
+      </div>
 
-# Tombol ambil foto
-take_photo = st.button("📷 Ambil Foto")
+      <div id="controls">
+        <button id="btnCapture">📷 Ambil Foto</button>
+        <button id="btnRetry" style="background:#6c757d">🔄 Foto Ulang</button>
+      </div>
 
-# Kalau belum ada foto, nyalakan kamera
-if st.session_state.photo is None:
-    cap = cv2.VideoCapture(0)
+      <div class="hint">Jika diminta, klik <strong>Allow</strong> untuk akses kamera.</div>
 
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            st.error("Tidak bisa mengakses kamera.")
-            break
+      <div id="output" style="margin-top:14px; text-align:center;">
+        <img id="resultImg" style="display:none"/>
+        <div id="downloadArea"></div>
+      </div>
+    </div>
 
-        # Mirror kamera
-        frame = cv2.flip(frame, 1)
+    <script>
+      const video = document.getElementById('video');
+      const overlay = document.getElementById('overlayImg');
+      const btnCapture = document.getElementById('btnCapture');
+      const btnRetry = document.getElementById('btnRetry');
+      const resultImg = document.getElementById('resultImg');
+      const downloadArea = document.getElementById('downloadArea');
 
-        # Convert ke RGBA dan resize
-        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        frame_pil = Image.fromarray(frame_rgb).convert("RGBA")
-        frame_pil = frame_pil.resize(frame_image.size)
+      async function startCamera() {{
+        try {{
+          const stream = await navigator.mediaDevices.getUserMedia({{ video: true, audio: false }});
+          video.srcObject = stream;
+          video.play();
+          return true;
+        }} catch (e) {{
+          alert('Gagal mengaktifkan kamera: ' + e.message);
+          return false;
+        }}
+      }}
 
-        # Gabungkan frame kamera dan PNG
-        combined = Image.alpha_composite(frame_pil, frame_image)
+      function captureImage() {{
+        const vw = video.videoWidth;
+        const vh = video.videoHeight;
+        if (!vw || !vh) {{
+          alert('Video belum siap, tunggu sebentar lalu coba lagi.');
+          return null;
+        }}
 
-        camera_placeholder.image(combined, use_container_width=True)
+        const fw = overlay.naturalWidth;
+        const fh = overlay.naturalHeight;
 
-        # Kalau tombol ambil foto ditekan
-        if take_photo:
-            st.session_state.photo = combined
-            break
+        const canvas = document.createElement('canvas');
+        canvas.width = fw;
+        canvas.height = fh;
+        const ctx = canvas.getContext('2d');
 
-    cap.release()
+        const scale = Math.max(fw / vw, fh / vh);
+        const drawW = vw * scale;
+        const drawH = vh * scale;
+        const offsetX = (fw - drawW) / 2;
+        const offsetY = (fh - drawH) / 2;
 
-# Kalau foto sudah diambil
-if st.session_state.photo is not None:
-    camera_placeholder.image(st.session_state.photo, use_container_width=True)
+        ctx.save();
+        ctx.translate(fw, 0);
+        ctx.scale(-1, 1);
+        ctx.drawImage(video, -offsetX, offsetY, drawW, drawH);
+        ctx.restore();
 
-    # Simpan ke bytes untuk download
-    img_bytes = io.BytesIO()
-    st.session_state.photo.save(img_bytes, format="PNG")
-    img_bytes.seek(0)
+        ctx.drawImage(overlay, 0, 0, fw, fh);
 
-    # Tombol download
-    st.download_button(
-        label="⬇ Download Foto",
-        data=img_bytes,
-        file_name=f"foto_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png",
-        mime="image/png"
-    )
+        const dataURL = canvas.toDataURL('image/png');
+        return dataURL;
+      }}
 
-    # Tombol foto ulang
-    if st.button("🔄 Foto Ulang"):
-        st.session_state.photo = None
-        st.rerun()
+      btnCapture.addEventListener('click', async () => {{
+        btnCapture.disabled = true;
+        btnCapture.innerText = 'Memproses...';
+        const dataURL = await captureImage();
+        if (!dataURL) {{
+          alert('Gagal membuat foto.');
+          btnCapture.disabled = false;
+          btnCapture.innerText = '📷 Ambil Foto';
+          return;
+        }}
+        resultImg.src = dataURL;
+        resultImg.style.display = 'block';
+
+        downloadArea.innerHTML = '';
+        const a = document.createElement('a');
+        a.href = dataURL;
+        a.download = 'foto_' + Date.now() + '.png';
+        a.innerText = '⬇ Download Foto';
+        a.style = 'display:inline-block;padding:10px 18px;border-radius:8px;background:#28a745;color:white;text-decoration:none;margin-top:8px;';
+        downloadArea.appendChild(a);
+
+        btnRetry.disabled = false;
+        btnCapture.disabled = false;
+        btnCapture.innerText = '📷 Ambil Foto';
+      }});
+
+      btnRetry.addEventListener('click', () => {{
+        resultImg.style.display = 'none';
+        resultImg.src = '';
+        downloadArea.innerHTML = '';
+      }});
+
+      startCamera();
+    </script>
+  </body>
+</html>
+"""
+
+st.components.v1.html(html_code, height=820, scrolling=True)
