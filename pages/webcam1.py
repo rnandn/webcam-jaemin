@@ -40,7 +40,6 @@ html_code = f"""
         /* ubah max-width sesuai kebutuhan; kita tetap menjaga aspect */
         max-width: 1280px;
         width: 100%;
-        aspect-ratio: 16/9;
       }}
       video {{
         width:100%;
@@ -218,9 +217,5 @@ html_code = f"""
 # embed HTML di Streamlit
 st.components.v1.html(html_code, height=820, scrolling=True)
 
-# Tombol foto ulang
-if st.button("🔄 Foto Ulang"):
-    st.session_state.photo = None
-    st.rerun()
 
 
