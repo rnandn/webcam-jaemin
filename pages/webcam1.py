@@ -6,8 +6,8 @@ st.set_page_config(layout="wide", page_title="Webcam + Live Frame (HTML overlay)
 
 st.title("📸 Webcam dengan Frame")
 
-# --- load frame png dari repo dan ubah jadi data URL (base64) ---
-FRAME_PATH = Path("Design Frame") / "birthday_frame.png"  # ubah nama file kalau perlu
+# --- load frame png ---
+FRAME_PATH = Path("Design Frame") / "birthday_frame.png"
 if not FRAME_PATH.exists():
     st.error(f"Frame tidak ditemukan di: {FRAME_PATH}. Pastikan path dan nama file benar.")
     st.stop()
@@ -17,10 +17,6 @@ with open(FRAME_PATH, "rb") as f:
 frame_b64 = base64.b64encode(frame_bytes).decode("utf-8")
 frame_data_url = f"data:image/png;base64,{frame_b64}"
 
-# --- ukuran preview yang kita inginkan (sesuaikan dengan ukuran frame PNG) ---
-# gunakan ukuran frame asli agar overlay pas. Jika frame besar, sesuaikan max-width/html css.
-# Kita akan membaca ukuran dari image via JS, tapi kita juga bisa menetapkan default styling.
-# Untuk performa, kita batasi display max-width agar pas di layar.
 html_code = f"""
 <!doctype html>
 <html>
@@ -37,15 +33,15 @@ html_code = f"""
       #videoContainer {{
         position: relative;
         display:inline-block;
-        /* ubah max-width sesuai kebutuhan; kita tetap menjaga aspect */
         max-width: 1280px;
         width: 100%;
+        aspect-ratio: 16/9;
       }}
       video {{
         width:100%;
         height:auto;
         -webkit-transform: scaleX(-1);
-        transform: scaleX(-1); /* mirror preview */
+        transform: scaleX(-1);
       }}
       #overlayImg {{
         position:absolute;
@@ -53,7 +49,7 @@ html_code = f"""
         top:0;
         width:100%;
         height:100%;
-        pointer-events:none; /* biar klik jatuh ke tombol & video */
+        pointer-events:none;
         image-rendering: optimizeQuality;
       }}
       #controls {{
@@ -92,7 +88,7 @@ html_code = f"""
         <button id="btnRetry" style="background:#6c757d">🔄 Foto Ulang</button>
       </div>
 
-      <div class="hint">Jika diminta, klik <strong>Allow</strong> untuk akses kamera. Preview sudah mirror agar hasil sama.</div>
+      <div class="hint">Jika diminta, klik <strong>Allow</strong> untuk akses kamera.</div>
 
       <div id="output" style="margin-top:14px; text-align:center;">
         <img id="resultImg" style="display:none"/>
@@ -108,7 +104,6 @@ html_code = f"""
       const resultImg = document.getElementById('resultImg');
       const downloadArea = document.getElementById('downloadArea');
 
-      // start webcam
       async function startCamera() {{
         try {{
           const stream = await navigator.mediaDevices.getUserMedia({{ video: true, audio: false }});
@@ -121,15 +116,7 @@ html_code = f"""
         }}
       }}
 
-      // ketika ukuran video berubah (loadedmetadata), sesuaikan overlay element dimensi
-      video.addEventListener('loadedmetadata', () => {{
-        // overlay element sudah width:100% height:100% jadi dia mengikuti container
-        // nothing else required here, but we keep event in case
-      }});
-
-      // capture function: draw mirrored video + overlay to canvas
       function captureImage() {{
-        // buat canvas sesuai ukuran natural video (w/h)
         const vw = video.videoWidth;
         const vh = video.videoHeight;
         if (!vw || !vh) {{
@@ -137,37 +124,30 @@ html_code = f"""
           return null;
         }}
 
-        // canvas ukuran video
+        const fw = overlay.naturalWidth;
+        const fh = overlay.naturalHeight;
+
         const canvas = document.createElement('canvas');
-        canvas.width = vw;
-        canvas.height = vh;
+        canvas.width = fw;
+        canvas.height = fh;
         const ctx = canvas.getContext('2d');
 
-        // mirror horizontally -> translate + scale
-        ctx.translate(canvas.width, 0);
+        const scale = Math.max(fw / vw, fh / vh);
+        const drawW = vw * scale;
+        const drawH = vh * scale;
+        const offsetX = (fw - drawW) / 2;
+        const offsetY = (fh - drawH) / 2;
+
+        ctx.save();
+        ctx.translate(fw, 0);
         ctx.scale(-1, 1);
+        ctx.drawImage(video, -offsetX, offsetY, drawW, drawH);
+        ctx.restore();
 
-        // draw video frame
-        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        ctx.drawImage(overlay, 0, 0, fw, fh);
 
-        // draw overlay image on top (overlay is data URL)
-        const overlayImg = new Image();
-        overlayImg.src = overlay.src;
-        return new Promise((resolve) => {{
-          overlayImg.onload = () => {{
-            // overlay image might have same aspect as canvas; draw covering full
-            ctx.drawImage(overlayImg, 0, 0, canvas.width, canvas.height);
-
-            // toDataURL
-            const dataURL = canvas.toDataURL('image/png');
-            resolve(dataURL);
-          }};
-          overlayImg.onerror = () => {{
-            // fallback: resolve video only
-            const dataURL = canvas.toDataURL('image/png');
-            resolve(dataURL);
-          }};
-        }});
+        const dataURL = canvas.toDataURL('image/png');
+        return dataURL;
       }}
 
       btnCapture.addEventListener('click', async () => {{
@@ -180,12 +160,9 @@ html_code = f"""
           btnCapture.innerText = '📷 Ambil Foto';
           return;
         }}
-
-        // tampilkan hasil di element <img>
         resultImg.src = dataURL;
         resultImg.style.display = 'block';
 
-        // buat tombol download
         downloadArea.innerHTML = '';
         const a = document.createElement('a');
         a.href = dataURL;
@@ -194,28 +171,21 @@ html_code = f"""
         a.style = 'display:inline-block;padding:10px 18px;border-radius:8px;background:#28a745;color:white;text-decoration:none;margin-top:8px;';
         downloadArea.appendChild(a);
 
-        // enable retry
         btnRetry.disabled = false;
         btnCapture.disabled = false;
         btnCapture.innerText = '📷 Ambil Foto';
       }});
 
       btnRetry.addEventListener('click', () => {{
-        // clear result & download
         resultImg.style.display = 'none';
         resultImg.src = '';
         downloadArea.innerHTML = '';
       }});
 
-      // init camera on load
       startCamera();
     </script>
   </body>
 </html>
 """
 
-# embed HTML di Streamlit
 st.components.v1.html(html_code, height=820, scrolling=True)
-
-
-
